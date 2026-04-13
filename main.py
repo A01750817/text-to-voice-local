@@ -5,6 +5,7 @@ import ctypes
 import signal
 import sys
 import logging
+import numpy as np
 from kokoro_onnx import Kokoro
 import sounddevice as sd
 import threading
@@ -75,6 +76,8 @@ def narrar_streaming(texto):
             if not frase_tts.endswith(('.', '!', '?')):
                 frase_tts += '.'  # evita que Kokoro corte el último fonema
             samples, sr = kokoro.create(frase_tts, voice=voice, speed=1.0, lang=idioma)
+            silencio = np.zeros(int(sr * 0.3), dtype=np.float32)
+            samples = np.concatenate([samples, silencio])
             cola.put((samples, sr))
         cola.put(None)  # señal de fin
 
