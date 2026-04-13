@@ -1,0 +1,11 @@
+# Modelos y audio (archivos grandes)
+*.onnx
+*.bin
+*.wav
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+env/
