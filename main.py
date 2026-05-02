@@ -1,118 +1,219 @@
 import pyperclip
-import win32gui
-import langid
-import ctypes
 import signal
 import sys
+import os
 import logging
 import numpy as np
 from kokoro_onnx import Kokoro
 import sounddevice as sd
 import threading
 import re
-import queue
+import tkinter as tk
+from tkinter import ttk
+import time
+import langid
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 
-kokoro = Kokoro("kokoro-v1.0.onnx", "voices-v1.0.bin")
-kokoro.create("warmup", voice="af_bella", speed=1.0, lang="es")  # primera inferencia cuesta más
+ultimo_clip = "___inicializado___"
+procesando = False
+mouse_x = 0
+mouse_y = 0
 
-WM_CLIPBOARDUPDATE = 0x031D
-ultimo_clip = ""
-detener = threading.Event()
-lock_clipboard = threading.Lock()
+try:
+    kokoro = Kokoro("kokoro-v1.0.onnx", "voices-v1.0.bin")
+    kokoro.create("warmup", voice="af_bella", speed=1.0, lang="es")
+    print("Kokoro cargado correctamente")
+except Exception as e:
+    print(f"Error cargando Kokoro: {e}")
+    sys.exit(1)
 
 
 def salir(sig, frame):
-    win32gui.PostQuitMessage(0)
-    sys.exit(0)
-
-
-def crear_ventana():
-    wc = win32gui.WNDCLASS()
-    wc.lpfnWndProc = procesar_mensaje
-    wc.lpszClassName = "NarradorClipboard"
-    wc.hInstance = win32gui.GetModuleHandle(None)
-    win32gui.RegisterClass(wc)
-    hwnd = win32gui.CreateWindow(
-        wc.lpszClassName, "Narrador",
-        0, 0, 0, 0, 0,  # invisible, sin tamaño
-        0, 0, wc.hInstance, None
-    )
-    ctypes.windll.user32.AddClipboardFormatListener(hwnd)
-    return hwnd
-
-
-def detectar_idioma(text):
-    idioma, _ = langid.classify(text)
-    return "es" if idioma == "es" else "en-us"
+    os._exit(0)
 
 
 def limpiar_texto(texto):
     texto = texto.replace("\n", " ")
-    texto = re.sub(r'\s+', ' ', texto)          # espacios múltiples → uno
-    texto = re.sub(r'[^\w\s.,!?¿¡]', '', texto) # quitar símbolos raros
+    texto = re.sub(r'\s+', ' ', texto)
+    texto = re.sub(r'[^\w\s.,!?¿¡]', '', texto)
     return texto.strip()
 
 
-def voz_por_idioma(lang):
-    return "ef_dora" if lang == "es" else "af_bella"
+def detectar_idioma(texto):
+    try:
+        
+        idioma, _ = langid.classify(texto)
+        return "es" if idioma == "es" else "en-us"
+    except:
+        return "es"
 
 
-def narrar_streaming(texto):
-    texto = limpiar_texto(texto)
-    frases = re.split(r'(?<=[.!?,])\s+', texto.strip())
-    frases = [f for f in frases if f.strip()]
+def narrar(texto, idioma_fijo):
+    global ultimo_clip, procesando
+    procesando = True
 
-    cola = queue.Queue()
+    try:
+        texto = limpiar_texto(texto)
 
-    def generador():
-        for frase in frases:
-            if detener.is_set():
-                break
-            idioma = detectar_idioma(frase)
-            voice = voz_por_idioma(idioma)
-            frase_tts = frase.strip()
-            if not frase_tts.endswith(('.', '!', '?')):
-                frase_tts += '.'  # evita que Kokoro corte el último fonema
-            samples, sr = kokoro.create(frase_tts, voice=voice, speed=1.0, lang=idioma)
-            silencio = np.zeros(int(sr * 0.3), dtype=np.float32)
-            samples = np.concatenate([samples, silencio])
-            cola.put((samples, sr))
-        cola.put(None)  # señal de fin
+        if not texto:
+            print("Texto vacío")
+            return
 
-    def reproductor():
-        while True:
-            item = cola.get()
-            if item is None or detener.is_set():
-                break
-            samples, sr = item
-            sd.play(samples, sr)
-            sd.wait()
+        print(f"Procesando en {idioma_fijo}...")
 
-    threading.Thread(target=generador, daemon=True).start()
-    reproductor()
+        voice = "ef_dora" if idioma_fijo == "es" else "af_bella"
+        lang = "es" if idioma_fijo == "es" else "en-us"
+
+        samples, sr = kokoro.create(texto, voice=voice, speed=1.0, lang=lang)
+
+        print(f"Audio generado: {len(samples)} samples, {sr} Hz")
+
+        sd.play(samples, sr)
+        sd.wait()
+
+        print("Listo!")
+
+    except Exception as e:
+        logging.error(f"Error: {e}")
+        print(f"Error: {e}")
+    finally:
+        procesando = False
+def mostrar_ui(texto, x, y):
+    global procesando
+    if procesando:
+        return
+
+    try:
+        root = tk.Tk()
+        root.title("Narrador")
+        root.geometry(f"290x220+{x-40}+{y-220}")
+        root.attributes("-topmost", True)
+        root.attributes("-alpha", 0.97)
+        root.overrideredirect(True)
+        root.configure(bg="#e9eef5")
+
+        style = ttk.Style()
+        style.configure("TLabel", font=("Segoe UI", 11))
+        style.configure("TButton", font=("Segoe UI", 11, "bold"), padding=(12, 8))
+
+        shell = tk.Frame(root, bg="#e9eef5", padx=12, pady=12)
+        shell.pack(fill=tk.BOTH, expand=True)
+
+        frame = tk.Frame(shell, bg="#f8fbff", padx=16, pady=14, highlightthickness=1, highlightbackground="#d0d9e8")
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        label_texto = ttk.Label(frame, text=f"Texto: {len(texto)} caracteres", font=("Segoe UI", 10))
+        label_texto.pack(pady=(0, 10))
+
+        idioma_detectado = detectar_idioma(texto)
+
+        ttk.Label(frame, text="Idioma detectado:").pack(pady=(10, 0))
+
+        idioma_var = tk.StringVar(value=idioma_detectado)
+        combo = ttk.Combobox(frame, textvariable=idioma_var, values=["es", "en-us"], state="readonly", width=10, font=("Segoe UI", 11))
+        combo.pack(pady=5)
+
+        def iniciar():
+            idioma = idioma_var.get()
+            root.destroy()
+            threading.Thread(target=narrar, args=(texto, idioma), daemon=True).start()
+
+        btn = tk.Button(
+            frame,
+            text="Narrar",
+            command=iniciar,
+            font=("Segoe UI", 11, "bold"),
+            bg="#1f6feb",
+            fg="white",
+            activebackground="#1558b0",
+            activeforeground="white",
+            relief="flat",
+            padx=18,
+            pady=10,
+            height=2,
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+        )
+        btn.pack(pady=(16, 8), fill=tk.X)
+
+        root.bind('<Return>', lambda e: iniciar())
+        root.bind('<Button-3>', lambda e: root.destroy())
+        root.bind('<Escape>', lambda e: root.destroy())
+
+        combo.focus()
+        root.after(8000, root.destroy)
+        root.mainloop()
+    except Exception as e:
+        print(f"Error mostrando UI: {e}")
 
 
-def procesar_mensaje(hwnd, msg, wparam, lparam):
+def monitorear_clipboard():
     global ultimo_clip
-    if msg == WM_CLIPBOARDUPDATE:
-        clip = pyperclip.paste()
-        with lock_clipboard:
-            if clip == ultimo_clip or not clip.strip():
-                return win32gui.DefWindowProc(hwnd, msg, wparam, lparam)
-            ultimo_clip = clip
 
-        logging.info("Clipboard cambió: %s", clip[:50])
-        detener.set()
-        sd.stop()
-        detener.wait(timeout=0.1)  # deja que threads vean el evento
-        detener.clear()
-        threading.Thread(target=lambda: narrar_streaming(clip), daemon=True).start()
+    time.sleep(2)
 
-    return win32gui.DefWindowProc(hwnd, msg, wparam, lparam)
+    try:
+        ultimo_clip = pyperclip.paste() or "___inicializado___"
+    except:
+        ultimo_clip = "___inicializado___"
+
+    while True:
+        time.sleep(0.5)
+        try:
+            actual = pyperclip.paste()
+            if actual and actual != ultimo_clip and len(actual.strip()) > 3:
+                ultimo_clip = actual
+                print(f"Clipboard: {actual[:50]}...")
+                mostrar_ui(actual, mouse_x, mouse_y)
+        except Exception as e:
+            logging.debug(f"Error clipboard: {e}")
+
+
+def on_click(x, y):
+    global mouse_x, mouse_y
+    mouse_x = x
+    mouse_y = y
+
+
+def crear_tray():
+    from pystray import Icon, Menu, MenuItem
+    from PIL import Image, ImageDraw
+
+    img = Image.new('RGB', (64, 64), color='#5B5EA6')
+    d = ImageDraw.Draw(img)
+    d.ellipse([16, 16, 48, 48], fill='white')
+    d.rectangle([28, 28, 36, 36], fill='#5B5EA6')
+
+    def salir(icon, item):
+        icon.stop()
+        os._exit(0)
+
+    menu = Menu(MenuItem("Mostrar", lambda i, u: print("Narrador activo")),
+                MenuItem("Salir", salir))
+    icon = Icon("narrador", img, "Narrador", menu)
+    icon.run()
 
 
 signal.signal(signal.SIGINT, salir)
-hwnd = crear_ventana()
-win32gui.PumpMessages()  # espera mensajes de Windows
+
+try:
+    from pynput.mouse import Listener
+
+    threading.Thread(target=crear_tray, daemon=True).start()
+    threading.Thread(target=monitorear_clipboard, daemon=True).start()
+
+    print("Narrador activo. Ctrl+C para copiar texto.")
+    print("Click derecho en bandeja para salir.")
+
+    with Listener(on_click=on_click, on_release=lambda x, y: None) as listener:
+        listener.join()
+
+except ImportError as e:
+    print(f"Falta dependencia: {e}")
+    print("Instalá: pip install pynput pystray pillow")
+except Exception as e:
+    print(f"Error: {e}")
+    import traceback
+    traceback.print_exc()
