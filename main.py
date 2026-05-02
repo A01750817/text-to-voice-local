@@ -103,8 +103,28 @@ def mostrar_ui(texto, x, y):
         frame = tk.Frame(shell, bg="#f8fbff", padx=16, pady=14, highlightthickness=1, highlightbackground="#d0d9e8")
         frame.pack(fill=tk.BOTH, expand=True)
 
+        header = tk.Frame(frame, bg="#f8fbff")
+        header.pack(fill=tk.X)
+
+        close_btn = tk.Button(
+            header,
+            text="x",
+            command=root.destroy,
+            font=("Segoe UI", 10, "bold"),
+            bg="#f8fbff",
+            fg="#5d6b82",
+            activebackground="#e8eef8",
+            activeforeground="#24344d",
+            relief="flat",
+            bd=0,
+            padx=8,
+            pady=2,
+            cursor="hand2",
+        )
+        close_btn.pack(side=tk.RIGHT)
+
         label_texto = ttk.Label(frame, text=f"Texto: {len(texto)} caracteres", font=("Segoe UI", 10))
-        label_texto.pack(pady=(0, 10))
+        label_texto.pack(pady=(4, 10))
 
         idioma_detectado = detectar_idioma(texto)
 
